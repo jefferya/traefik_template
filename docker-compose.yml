@@ -23,6 +23,8 @@ x-traefik-certresolver: &traefik-certresolver resolver
 
 networks:
     default:
+        name: ${COMPOSE_PROJECT_NAME}_default
+        #driver: bridge
 
 volumes:
   whoami-data: {}
@@ -55,22 +57,41 @@ services:
             <<: [*traefik-enable, *traefik-https-redirect-middleware]
             traefik.http.routers.whoami_http.entrypoints: http
             traefik.http.routers.whoami_http.middlewares: *traefik-https-redirect
-            traefik.http.routers.whoami_http.rule: &traefik-host-whoami (Host(${DOMAIN}) && PathPrefix(`whoami`))
+            traefik.http.routers.whoami_http.rule: &traefik-host-whoami Host(`${DOMAIN}`) && PathPrefix(`/whoami`)
             traefik.http.routers.whoami_http.service: whoami
             traefik.http.routers.whoami_https.entrypoints: https
             traefik.http.routers.whoami_https.rule: *traefik-host-whoami
             traefik.http.routers.whoami_https.tls: true
-            traefik.http.services.whoami.loadbalancer.server.port: 8000
+            traefik.http.routers.whoami_https.service: whoami
+            traefik.http.routers.whoami_https.tls.certresolver: resolver
+            traefik.http.services.whoami.loadbalancer.server.port: 80
         volumes:
           - whoami-data:/var/whoami:rw
         networks:
             default:
-                aliases: # Allow access without using the `-dev` or `-prod` suffix.
-                    - whoami 
-        #depends_on:
+
+    whoami2:
+        image: traefik/whoami:latest
+        labels:
+            <<: [*traefik-enable, *traefik-https-redirect-middleware]
+            traefik.http.routers.whoami2_http.entrypoints: http
+            traefik.http.routers.whoami2_http.middlewares: *traefik-https-redirect
+            traefik.http.routers.whoami2_http.rule: &traefik-host-whoami2 Host(`${DOMAIN}`) && PathPrefix(`/whoami2`)
+            traefik.http.routers.whoami2_http.service: whoami2
+            traefik.http.routers.whoami2_https.entrypoints: https
+            traefik.http.routers.whoami2_https.rule: *traefik-host-whoami2
+            traefik.http.routers.whoami2_https.tls: true
+            traefik.http.routers.whoami2_https.service: whoami2
+            traefik.http.routers.whoami2_https.tls.certresolver: resolver
+            traefik.http.services.whoami2.loadbalancer.server.port: 80
+        volumes:
+          - whoami-data:/var/whoami:rw
+        networks:
+            default:
+
 
     traefik:
-        image: traefik:3
+        image: traefik:2
         # Change certificatesResolvers caServer to use the staging server when testing changes to the Traefik.
         #   Using the staging server will prevent changes, e.g., firewall changes, from Let's Encrypt suspending
         #   certificate generation attempts for a period of time if config mistakes occur
@@ -83,6 +104,7 @@ services:
         # @See https://letsencrypt.org/docs/staging-environment/
         # @See https://doc.traefik.io/traefik/https/acme/
         command: >-
+            --accesslog=true
             --api.insecure=false
             --api.dashboard=false
             --api.debug=false
@@ -91,9 +113,10 @@ services:
             --entryPoints.http.forwardedHeaders.trustedIPs=${FRONTEND_IPs}
             --entryPoints.https.forwardedHeaders.trustedIPs=${FRONTEND_IPs}
             --entrypoints.https.http.tls.certResolver=resolver
+            --log.level=INFO
             --providers.file.filename=/etc/traefik/tls.yml
             --providers.docker=true
-            --providers.docker.network=default
+            --providers.docker.network=${COMPOSE_PROJECT_NAME}_default
             --providers.docker.exposedByDefault=false
             --certificatesresolvers.resolver.acme.httpchallenge=true
             --certificatesresolvers.resolver.acme.httpchallenge.entrypoint=http
@@ -102,6 +125,9 @@ services:
             --certificatesResolvers.resolver.acme.caServer=https://acme-v02.api.letsencrypt.org/directory
         labels:
             <<: [*traefik-disable] # Do no route to Traefik dashboard as it is disabled in production.
+        ports:
+            - "80:80"
+            - "443:443"
         volumes:
             - /var/run/docker.sock:/var/run/docker.sock:z,rw
             - ./traefik_config/certs:/acme:Z
